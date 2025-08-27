@@ -41,4 +41,8 @@ class Vigenere(Crypto):
 
 		return plaintext
 
+	def kasiski_cracker(self, plaintext):
+		start = []
+		matches = re.finditer
+
 
