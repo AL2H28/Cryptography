@@ -1,37 +1,45 @@
 from typing import List
 
-
 class AES:
-    
+    # Rcon táblázat (0. elem dummy, hogy az indexelés 1-től induljon)
+    R_CON = [0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36]
+    S_BOX = None
+    INV_S_BOX = None
+
+    # --- GF(2^8) műveletek ----------------------------------------------------
+
     @staticmethod
-    def gf_mul(a, b):
+    def mul(a: int, b: int) -> int:
+        """Szorzás GF(2^8)-ban az AES polinommal (x^8 + x^4 + x^3 + x + 1)."""
+        a &= 0xFF
+        b &= 0xFF
         res = 0
         for _ in range(8):
             if b & 1:
                 res ^= a
-            high_bit = a & 0x80
-            a <<= 1
-            if high_bit:
+            hi_bit = a & 0x80
+            a = (a << 1) & 0xFF
+            if hi_bit:
                 a ^= 0x1B
             b >>= 1
-        return res
-    
+        return res & 0xFF
+
     @staticmethod
-    def gf_inverse(a):
+    def gf_inverse(a: int) -> int:
+        """Multiplikatív inverz GF(2^8)-ban (brute-force módszer)."""
+        a &= 0xFF
         if a == 0:
             return 0
-        
-        if b in range(1, 256):
-            if gf_mul(a, b) == 1:
+        for b in range(1, 256):
+            if AES.mul(a, b) == 1:
                 return b
-        raise ValueError("No multiplicative inverse found")
-    
+        raise ValueError("Nincs multiplikatív inverz.")
+
+    # --- S-box és inverse S-box generálás ------------------------------------
+
     @staticmethod
-    def affine_transform(x):
-        """AES S-box affinn transzformációja (bitenkénti XOR + 0x63 hozzáadása)."""
-        # az eredeti AES definíció alapján:
-        # b_i' = b_i ⊕ b_{i+4} ⊕ b_{i+5} ⊕ b_{i+6} ⊕ b_{i+7} ⊕ c_i
-        # ahol c = 0x63
+    def affine_transform(x: int) -> int:
+        """Affine transzformáció (S-box definíció szerinti bitművelet)."""
         c = 0x63
         res = 0
         for i in range(8):
@@ -42,164 +50,157 @@ class AES:
                   ((x >> ((i + 7) % 8)) & 1) ^ \
                   ((c >> i) & 1)
             res |= (bit << i)
-        # egyszerűsített formában:
-        # res = x ^ (x << 1) ^ (x << 2) ^ (x << 3) ^ (x << 4) ^ 0x63
-        return res
-    
+        return res & 0xFF
+
     @staticmethod
-    def generate_sbox(self):
+    def generate_sbox() -> List[int]:
         sbox = []
         for x in range(256):
-            inv = self.gf_inverse(x)
+            inv = AES.gf_inverse(x)
             sbox.append(AES.affine_transform(inv))
         return sbox
-    
+
     @staticmethod
-    def generate_inverse_sbox(sbox):
-        inverse_sbox = [0] * 256
-        for i, val in enumerate(sbox):
-            inverse_sbox[val] = i
-        return inverse_sbox
-    
-    S_BOX = generate_sbox()
-    INV_S_BOX = generate_inverse_sbox(S_BOX)
-    R_CON = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36]
-    
+    def generate_inverse_sbox(sbox: List[int]) -> List[int]:
+        inv = [0] * 256
+        for i, v in enumerate(sbox):
+            inv[v] = i
+        return inv
+
+    # --- Segédfüggvények ------------------------------------------------------
+
     @staticmethod
     def xor_bytes(a: bytes, b: bytes) -> bytes:
         return bytes(i ^ j for i, j in zip(a, b))
-    
+
     @staticmethod
     def bytes_to_matrix(b: bytes) -> List[List[int]]:
-        return [List(b[i::4]) for i in range(4)]
-    
+        """16 bájt -> 4x4 mátrix (column-major)."""
+        return [list(b[i::4]) for i in range(4)]
+
     @staticmethod
     def matrix_to_bytes(matrix: List[List[int]]) -> bytes:
+        """4x4 mátrix -> 16 bájt (column-major)."""
         return bytes([matrix[i][j] for j in range(4) for i in range(4)])
-    
-    @staticmethod
-    def xtime(a: int) -> int:
-        return ((a << 1) ^ 0xff) ^ (0x1b if a & 0x80 else 0x00)
-    
-    @staticmethod
-    def mul(a: int, b: int) -> int:
-        # szorzás GF(2⁸) felett
-        res = 0
-        for i in range(8):
-            if b & 1:
-                res ^= a
-            high_bit = a & 0x80
-            a = (a << 1) & 0xff
-            if high_bit:
-                a ^= 0x1b
-            b >>= 1
-        
-        return res
-    
+
+    # --- AES transzformációk --------------------------------------------------
+
     @staticmethod
     def sub_bytes(state: List[List[int]]):
-        for i in range(4):
-            for j in range(4):
-                state[i][j] = AES.S_BOX[state[i][j]]
-    
+        for r in range(4):
+            for c in range(4):
+                state[r][c] = AES.S_BOX[state[r][c]]
+
     @staticmethod
     def inverse_sub_bytes(state: List[List[int]]):
-        for i in range(4):
-            for j in range(4):
-                state[i][j] = AES.INV_S_BOX[state[i][j]]
-    
+        for r in range(4):
+            for c in range(4):
+                state[r][c] = AES.INV_S_BOX[state[r][c]]
+
     @staticmethod
     def shift_rows(state: List[List[int]]):
         state[1] = state[1][1:] + state[1][:1]
         state[2] = state[2][2:] + state[2][:2]
         state[3] = state[3][3:] + state[3][:3]
-    
+
     @staticmethod
     def inverse_shift_rows(state: List[List[int]]):
         state[1] = state[1][-1:] + state[1][:-1]
         state[2] = state[2][-2:] + state[2][:-2]
         state[3] = state[3][-3:] + state[3][:-3]
-    
+
     @staticmethod
     def mix_single_column(column: List[int]):
         a = column[:]
-        column[0] = AES.gf_mul(a[0], 2) ^ AES.gf_mul(a[1], 3) ^ a[2] ^ a[3]
-        column[1] = a[0] ^ AES.gf_mul(a[1], 2) ^ AES.gf_mul(a[2], 3) ^ a[3]
-        column[2] = a[0] ^ a[1] ^ AES.gf_mul(a[2], 2) ^ AES.gf_mul(a[3], 3)
-        column[3] = AES.gf_mul(a[0], 3) ^ a[1] ^ a[2] ^ AES.gf_mul(a[3], 2)
-    
+        column[0] = AES.mul(a[0], 2) ^ AES.mul(a[1], 3) ^ a[2] ^ a[3]
+        column[1] = a[0] ^ AES.mul(a[1], 2) ^ AES.mul(a[2], 3) ^ a[3]
+        column[2] = a[0] ^ a[1] ^ AES.mul(a[2], 2) ^ AES.mul(a[3], 3)
+        column[3] = AES.mul(a[0], 3) ^ a[1] ^ a[2] ^ AES.mul(a[3], 2)
+
     @staticmethod
     def mix_columns(state: List[List[int]]):
-        for i in range(4):
-            column = [state[j][i] for j in range(4)]
-            AES.mix_single_column(column)
-            for j in range(4):
-                state[j][i] = column[j]
-    
+        for c in range(4):
+            col = [state[r][c] for r in range(4)]
+            AES.mix_single_column(col)
+            for r in range(4):
+                state[r][c] = col[r]
+
     @staticmethod
     def inverse_mix_single_column(column: List[int]):
         a = column[:]
-        column[0] = AES.gf_mul(a[0], 0x0e) ^ AES.gf_mul(a[1], 0x0b) ^ AES.gf_mul(a[2], 0x0d) ^ AES.gf_mul(a[3], 0x09)
-        column[1] = AES.gf_mul(a[0], 0x09) ^ AES.gf_mul(a[1], 0x0e) ^ AES.gf_mul(a[2], 0x0b) ^ AES.gf_mul(a[3], 0x0d)
-        column[2] = AES.gf_mul(a[0], 0x0d) ^ AES.gf_mul(a[1], 0x09) ^ AES.gf_mul(a[2], 0x0e) ^ AES.gf_mul(a[3], 0x0b)
-        column[3] = AES.gf_mul(a[0], 0x0b) ^ AES.gf_mul(a[1], 0x0d) ^ AES.gf_mul(a[2], 0x09) ^ AES.gf_mul(a[3], 0x0e)
-    
+        column[0] = AES.mul(a[0], 0x0e) ^ AES.mul(a[1], 0x0b) ^ AES.mul(a[2], 0x0d) ^ AES.mul(a[3], 0x09)
+        column[1] = AES.mul(a[0], 0x09) ^ AES.mul(a[1], 0x0e) ^ AES.mul(a[2], 0x0b) ^ AES.mul(a[3], 0x0d)
+        column[2] = AES.mul(a[0], 0x0d) ^ AES.mul(a[1], 0x09) ^ AES.mul(a[2], 0x0e) ^ AES.mul(a[3], 0x0b)
+        column[3] = AES.mul(a[0], 0x0b) ^ AES.mul(a[1], 0x0d) ^ AES.mul(a[2], 0x09) ^ AES.mul(a[3], 0x0e)
+
     @staticmethod
     def inverse_mix_columns(state: List[List[int]]):
-        for i in range(4):
-            column = [state[j][i] for j in range(4)]
-            AES.inverse_mix_single_column(column)
-            for j in range(4):
-                state[j][i] = column[j]
-    
+        for c in range(4):
+            col = [state[r][c] for r in range(4)]
+            AES.inverse_mix_single_column(col)
+            for r in range(4):
+                state[r][c] = col[r]
+
     @staticmethod
     def add_round_key(state: List[List[int]], round_key: List[List[int]]):
-        for i in range(4):
-            for j in range(4):
-                state[i][j] ^= round_key[i][j]
-    
+        for r in range(4):
+            for c in range(4):
+                state[r][c] ^= round_key[r][c]
+
+    # --- Kulcsexpanzió -------------------------------------------------------
+
     @staticmethod
-    def key_expansion(key: bytes):
-        assert len(key) == 16
-        words = [list(key[i:i + 4]) for i in range(0, 16, 4)]
-        for i in range(4, 44):
+    def key_expansion(key: bytes) -> List[List[List[int]]]:
+        if len(key) not in (16, 24, 32):
+            raise ValueError("Kulcs hossza csak 16, 24 vagy 32 bájt lehet (AES-128/192/256).")
+
+        Nk = len(key) // 4
+        Nb = 4
+        Nr = {4: 10, 6: 12, 8: 14}[Nk]
+
+        words = [list(key[i:i + 4]) for i in range(0, len(key), 4)] # a key elemei 4 karakteres blokkok listaja
+        total_words = Nb * (Nr + 1)
+
+        for i in range(len(words), total_words):
             temp = words[i - 1].copy()
-            if i % 4 == 0:
-                # rotword
-                temp = temp[1:] + temp[:1]
-                # subword
+            if i % Nk == 0:
+                temp = temp[1:] + temp[:1]  # RotWord a temp 1. elemét a temp végére helyezi
+                temp = [AES.S_BOX[b] for b in temp]  # SubWord
+                temp[0] ^= AES.R_CON[i // Nk] #rcon alkalmazása
+            elif Nk > 6 and (i % Nk) == 4:
                 temp = [AES.S_BOX[b] for b in temp]
-                # rcon
-                temp ^= AES.R_CON[i // 4]
-            words.append([words[i - 4][j] ^ temp[j] & 0xff for j in range(4)])
+            words.append([(words[i - Nk][j] ^ temp[j]) & 0xFF for j in range(4)])
+
         round_keys = []
-        for i in range(11):
-            rk = words[4 * i:4 * i + 4]
-            mat = [[rk[j][i] for j in range(4)] for i in range(4)]
+        for r in range(Nr + 1):
+            block = words[r * Nb:(r + 1) * Nb]
+            mat = [[block[col][row] for col in range(Nb)] for row in range(4)]
             round_keys.append(mat)
         return round_keys
-    
+
+    # --- Titkosítás / visszafejtés -------------------------------------------
+
     @staticmethod
-    def encrypt(plaintext: bytes, round_keys: List[List[List[int]]]) -> bytes:
+    def encrypt_block(plaintext: bytes, round_keys: List[List[List[int]]]) -> bytes:
         assert len(plaintext) == 16
         state = AES.bytes_to_matrix(plaintext)
         AES.add_round_key(state, round_keys[0])
-        for rnd in range(1, 10):
+        for rnd in range(1, len(round_keys) - 1):
             AES.sub_bytes(state)
             AES.shift_rows(state)
             AES.mix_columns(state)
             AES.add_round_key(state, round_keys[rnd])
         AES.sub_bytes(state)
         AES.shift_rows(state)
-        AES.add_round_key(state, round_keys[10])
+        AES.add_round_key(state, round_keys[-1])
         return AES.matrix_to_bytes(state)
-    
+
     @staticmethod
-    def decrypt(ciphertext: bytes, round_keys: List[List[List[int]]]) -> bytes:
+    def decrypt_block(ciphertext: bytes, round_keys: List[List[List[int]]]) -> bytes:
         assert len(ciphertext) == 16
         state = AES.bytes_to_matrix(ciphertext)
-        AES.add_round_key(state, round_keys[10])
-        for rnd in range(9, 0, -1):
+        AES.add_round_key(state, round_keys[-1])
+        for rnd in range(len(round_keys) - 2, 0, -1):
             AES.inverse_shift_rows(state)
             AES.inverse_sub_bytes(state)
             AES.add_round_key(state, round_keys[rnd])
@@ -208,23 +209,24 @@ class AES:
         AES.inverse_sub_bytes(state)
         AES.add_round_key(state, round_keys[0])
         return AES.matrix_to_bytes(state)
-    
-    @staticmethod
-    def demo():
-        # Example plaintext and key (16 bytes each)
-        plaintext = b"Two One Nine Two"  # 16 bytes
-        key = b"Thats my Kung Fu"  # 16 bytes
-        print("Plaintext:", plaintext)
-        print("Key      :", key)
-        rk = AES.key_expansion(key)
-        ciphertext = AES.encrypt(plaintext, rk)
-        print("Ciphertext (hex):", ciphertext.hex())
-        recovered = AES.decrypt(ciphertext, rk)
-        print("Decrypted:", recovered)
-        assert recovered == plaintext
-        print("Decryption successful: recovered == plaintext")
 
 
-if __name__ == '__main__':
-    aes = AES()
-    aes.demo()
+# --- DEMO -------------------------------------------------------------------
+
+if __name__ == "__main__":
+    AES.S_BOX = AES.generate_sbox()
+    AES.INV_S_BOX = AES.generate_inverse_sbox(AES.S_BOX)
+
+    plaintext = b"Two One Nine Two"
+    key = b"Thats my Kung Fu"
+
+    print("Plaintext:", plaintext)
+    print("Key      :", key)
+
+    round_keys = AES.key_expansion(key)
+    ciphertext = AES.encrypt_block(plaintext, round_keys)
+    decrypted = AES.decrypt_block(ciphertext, round_keys)
+
+    print("Ciphertext (hex):", ciphertext.hex())
+    print("Decrypted:", decrypted)
+    print("Decryption successful:", decrypted == plaintext)
