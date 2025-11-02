@@ -1,7 +1,6 @@
 from typing import List
 
 class AES:
-    # Rcon táblázat (0. elem dummy, hogy az indexelés 1-től induljon)
     R_CON = [0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36]
     S_BOX = None
     INV_S_BOX = None
@@ -26,7 +25,7 @@ class AES:
 
     @staticmethod
     def gf_inverse(a: int) -> int:
-        """Multiplikatív inverz GF(2^8)-ban (brute-force módszer)."""
+        """Multiplikatív inverz GF(2^8)-ban"""
         a &= 0xFF
         if a == 0:
             return 0
@@ -217,8 +216,9 @@ if __name__ == "__main__":
     AES.S_BOX = AES.generate_sbox()
     AES.INV_S_BOX = AES.generate_inverse_sbox(AES.S_BOX)
 
-    plaintext = b"Two One Nine Two"
-    key = b"Thats my Kung Fu"
+    plaintext = b"tizenhat byte!!!"
+    key = b"16 byte-os kulcs"
+    
 
     print("Plaintext:", plaintext)
     print("Key      :", key)
